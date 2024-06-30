@@ -1,0 +1,19 @@
+# Ignore config file with API keys
+config.py
+
+# Ignore Python virtual environment
+venv/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore IDE-specific files (adjust as needed)
+.vscode/
+.idea/
+
+# Ignore logs
+*.log
+
+# Ignore bot data file
+bot_data.json
