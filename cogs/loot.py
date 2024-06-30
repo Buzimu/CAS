@@ -1,4 +1,4 @@
-#implement fetch_loot_table and get_weapon_hash to get this working
+#todo: verify api calls
 import discord
 from discord import app_commands
 from discord.ext import commands
