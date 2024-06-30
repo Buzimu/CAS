@@ -3,6 +3,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import aiohttp
+from bungie_client import bungie_client
+from config import BUNGIE_API_KEY
 
 class LootCog(commands.Cog):
     def __init__(self, bot):
@@ -108,41 +110,99 @@ class OtherActivitySelect(discord.ui.Select):
         embed = create_loot_embed(self.values[0], loot_table)
         await interaction.edit_original_response(content=None, embed=embed, view=None)
 
+
+
 async def fetch_loot_table(activity_name: str, activity_type: str):
-    # This is a placeholder function. In a real implementation, you would fetch this data
-    # from an API or database. For now, we'll return some sample data.
-    # Todo: Verify how the API retuns this data
-    if activity_type == "raid":
-        return {
-            "Encounter 1": ["Weapon A", "Weapon B"],
-            "Encounter 2": ["Weapon C", "Weapon D"],
-            "Final Boss": ["Exotic Weapon"]
-        }
-    elif activity_type == "dungeon":
-        return {
-            "First Area": ["Weapon E", "Weapon F"],
-            "Boss": ["Weapon G", "Weapon H"]
-        }
-    else:
-        return ["Weapon I", "Weapon J", "Weapon K"]
+    # We'll use the Bungie API to fetch this data
+    # This requires multiple API calls and data processing
+
+    if activity_type == "raid" or activity_type == "dungeon":
+        # Fetch activity definition
+        activity_def = await get_activity_definition(activity_name)
+        if not activity_def:
+            return None
+
+        # Fetch rewards for each encounter
+        loot_table = {}
+        for phase in activity_def.get('phases', []):
+            encounter_name = phase.get('name', 'Unknown Encounter')
+            reward_items = await get_activity_rewards(activity_def['hash'], phase.get('phaseHash'))
+            loot_table[encounter_name] = reward_items
+
+    else:  # Other activities (crucible, vanguard, etc.)
+        # Fetch activity rewards
+        activity_def = await get_activity_definition(activity_name)
+        if not activity_def:
+            return None
+
+        reward_items = await get_activity_rewards(activity_def['hash'])
+        loot_table = reward_items
+
+    return loot_table
+
+async def get_activity_definition(activity_name: str):
+    # Fetch activity definition from Bungie API
+    try:
+        response = await bungie_client.api.search_destiny_entity('DestinyActivityDefinition', activity_name)
+        if response and response.results:
+            return response.results[0].hash
+    except Exception as e:
+        print(f"Error fetching activity definition: {e}")
+    return None
+
+async def get_activity_rewards(activity_hash: int, phase_hash: int = None):
+    # Fetch rewards for a specific activity (and phase, if applicable)
+    try:
+        response = await bungie_client.api.get_destiny_entity('DestinyActivityDefinition', activity_hash)
+        if response and response.response:
+            activity_def = response.response
+            if phase_hash:
+                phase_rewards = activity_def.get('phases', {}).get(phase_hash, {}).get('rewards', [])
+            else:
+                phase_rewards = activity_def.get('rewards', [])
+
+            reward_items = []
+            for reward in phase_rewards:
+                item_def = await get_item_definition(reward['itemHash'])
+                if item_def and item_def['itemType'] == 3:  # 3 is the item type for weapons
+                    reward_items.append({
+                        'name': item_def['displayProperties']['name'],
+                        'hash': item_def['hash']
+                    })
+            return reward_items
+    except Exception as e:
+        print(f"Error fetching activity rewards: {e}")
+    return []
+
+async def get_item_definition(item_hash: int):
+    # Fetch item definition from Bungie API
+    try:
+        response = await bungie_client.api.get_destiny_entity('DestinyInventoryItemDefinition', item_hash)
+        if response and response.response:
+            return response.response
+    except Exception as e:
+        print(f"Error fetching item definition: {e}")
+    return None
+
+def get_weapon_hash(weapon_name: str):
+    # This function is now unnecessary as we're fetching real hashes
+    # from the Bungie API in the fetch_loot_table function
+    pass
 
 def create_loot_embed(activity_name: str, loot_table: dict):
     embed = discord.Embed(title=f"Loot Table for {activity_name.replace('_', ' ').title()}", color=discord.Color.gold())
     
     if isinstance(loot_table, dict):  # For raids and dungeons
         for encounter, weapons in loot_table.items():
-            weapon_links = [f"[{weapon}](https://www.light.gg/db/items/{get_weapon_hash(weapon)})" for weapon in weapons]
-            embed.add_field(name=encounter, value="\n".join(weapon_links), inline=False)
+            weapon_links = [f"[{weapon['name']}](https://www.light.gg/db/items/{weapon['hash']})" for weapon in weapons]
+            embed.add_field(name=encounter, value="\n".join(weapon_links) or "No weapons", inline=False)
     else:  # For other activities
-        weapon_links = [f"[{weapon}](https://www.light.gg/db/items/{get_weapon_hash(weapon)})" for weapon in loot_table]
-        embed.add_field(name="Weapons", value="\n".join(weapon_links), inline=False)
+        weapon_links = [f"[{weapon['name']}](https://www.light.gg/db/items/{weapon['hash']})" for weapon in loot_table]
+        embed.add_field(name="Weapons", value="\n".join(weapon_links) or "No weapons", inline=False)
     
     return embed
 
-def get_weapon_hash(weapon_name: str):
-    # This function should return the actual hash for the weapon.
-    # For now, we'll return a placeholder value.
-    return "0"
+
 
 async def setup(bot):
     await bot.add_cog(LootCog(bot))
